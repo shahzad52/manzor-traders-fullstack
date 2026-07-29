@@ -1,0 +1,175 @@
+================================================================================
+           MANZOR TRADERS FULLSTACK - COMPLETE SETUP & DEPLOYMENT GUIDE
+================================================================================
+
+PROJECT OVERVIEW:
+-----------------
+• Backend Framework : Node.js + Express API
+• Frontend Framework: React (Vite) Single Page Application
+• Database          : PostgreSQL on Cloud Supabase (Tokyo ap-northeast-1)
+• Authentication    : Google Firebase Auth (shakir-pos project)
+• Hosting Target    : Hostinger VPS #1 (Backend) & Hostinger VPS #2 (Frontend)
+
+
+================================================================================
+SECTION 1: ENVIRONMENT VARIABLES CONFIGURATION
+================================================================================
+
+1. BACKEND VPS ENVIRONMENT FILE (`backend/.env`):
+-------------------------------------------------
+Create file at `/var/www/backend/.env`:
+
+PORT=4000
+CORS_ORIGIN=*
+DATABASE_URL=postgresql://postgres.dxdmkwbwzdjbthvadxry:Mudassar523b%40@aws-0-ap-northeast-1.pooler.supabase.com:6543/postgres
+FIREBASE_SERVICE_ACCOUNT_PATH=./service-account.json
+
+Note: Replace CORS_ORIGIN=* with your live frontend domain (e.g., https://yourdomain.com) in production if strict origin locking is desired.
+
+
+2. FRONTEND VPS ENVIRONMENT FILE (`manzor-traders/.env`):
+----------------------------------------------------------
+Create file at `/var/www/frontend/.env`:
+
+VITE_API_URL=https://api.yourdomain.com
+VITE_FIREBASE_API_KEY=AIzaSyCp7cfo5WhPQ7pCZDkJp3VYJxM6up8Rbwk
+VITE_FIREBASE_AUTH_DOMAIN=shakir-pos.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=shakir-pos
+VITE_FIREBASE_STORAGE_BUCKET=shakir-pos.firebasestorage.app
+VITE_FIREBASE_MESSAGING_SENDER_ID=1070570595901
+VITE_FIREBASE_APP_ID=1:1070570595901:web:97516e9de6f5001db76c54
+VITE_FIREBASE_MEASUREMENT_ID=G-C82M4LVV9F
+
+Note: Update VITE_API_URL to point to your live Hostinger Backend VPS domain or IP.
+
+
+================================================================================
+SECTION 2: BACKEND DEPLOYMENT (HOSTINGER VPS #1)
+================================================================================
+
+Step 1: SSH into your Backend VPS
+  $ ssh root@YOUR_BACKEND_VPS_IP
+
+Step 2: Install Node.js v22, Git, Nginx, Certbot & PM2
+  $ curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+  $ sudo apt-get update && sudo apt-get install -y nodejs git nginx certbot python3-certbot-nginx
+  $ sudo npm install -g pm2
+
+Step 3: Clone Code & Install Dependencies
+  $ git clone YOUR_REPOSITORY_URL /var/www/backend
+  $ cd /var/www/backend
+  $ npm install --omit=dev
+
+Step 4: Create Production .env
+  $ nano .env
+  (Paste the Backend .env contents from Section 1 above and save: Ctrl+O, Enter, Ctrl+X)
+
+Step 5: Run Database Schema Migration
+  $ npm run migrate
+
+Step 6: Start Backend Process with PM2
+  $ pm2 start src/server.js --name "manzor-backend"
+  $ pm2 save
+  $ pm2 startup
+
+Step 7: Configure Nginx Reverse Proxy
+  $ sudo nano /etc/nginx/sites-available/backend
+
+  Add the following server block:
+  --------------------------------------------------
+  server {
+      server_name api.yourdomain.com;
+
+      location / {
+          proxy_pass http://127.0.0.1:4000;
+          proxy_http_version 1.1;
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection 'upgrade';
+          proxy_set_header Host $host;
+          proxy_cache_bypass $http_upgrade;
+      }
+  }
+  --------------------------------------------------
+
+Step 8: Enable Nginx Site & Setup Free SSL
+  $ sudo ln -s /etc/nginx/sites-available/backend /etc/nginx/sites-enabled/
+  $ sudo nginx -t && sudo systemctl reload nginx
+  $ sudo certbot --nginx -d api.yourdomain.com
+
+
+================================================================================
+SECTION 3: FRONTEND DEPLOYMENT (HOSTINGER VPS #2)
+================================================================================
+
+Step 1: SSH into your Frontend VPS
+  $ ssh root@YOUR_FRONTEND_VPS_IP
+
+Step 2: Install Node.js v22, Git, Nginx & Certbot
+  $ curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+  $ sudo apt-get update && sudo apt-get install -y nodejs git nginx certbot python3-certbot-nginx
+
+Step 3: Clone Code & Install Dependencies
+  $ git clone YOUR_REPOSITORY_URL /var/www/frontend
+  $ cd /var/www/frontend
+
+Step 4: Create Production .env
+  $ nano .env
+  (Paste the Frontend .env contents from Section 1 above and save)
+
+Step 5: Build Production Static Files
+  $ npm install
+  $ npm run build
+  (This generates static assets inside /var/www/frontend/dist)
+
+Step 6: Configure Nginx Web Server
+  $ sudo nano /etc/nginx/sites-available/frontend
+
+  Add the following server block:
+  --------------------------------------------------
+  server {
+      server_name yourdomain.com;
+      root /var/www/frontend/dist;
+      index index.html;
+
+      location / {
+          try_files $uri $uri/ /index.html;
+      }
+  }
+  --------------------------------------------------
+
+Step 7: Enable Nginx Site & Setup Free SSL
+  $ sudo ln -s /etc/nginx/sites-available/frontend /etc/nginx/sites-enabled/
+  $ sudo nginx -t && sudo systemctl reload nginx
+  $ sudo certbot --nginx -d yourdomain.com
+
+
+================================================================================
+SECTION 4: LOCAL DEVELOPMENT COMMANDS
+================================================================================
+
+To run the project locally on your development machine:
+
+1. Start Backend:
+   $ cd backend
+   $ npm run dev
+   (Runs Express API on http://localhost:4000)
+
+2. Start Frontend:
+   $ cd manzor-traders
+   $ npm run dev
+   (Runs Vite Dev Server on http://localhost:5173)
+
+3. Run PostgreSQL Database Load Test Script:
+   $ cd backend
+   $ node src/testProductionLoad.js
+
+
+================================================================================
+SECTION 5: VERIFICATION CHECKLIST
+================================================================================
+
+[ ] Backend Health Check: Visit https://api.yourdomain.com/health → Should return {"ok":true}
+[ ] Frontend UI: Visit https://yourdomain.com → InvManager login dashboard loads cleanly
+[ ] Auth Test: Sign in or register new user → Firebase Auth succeeds and redirects to dashboard
+[ ] Database Verification: Create product or invoice → Data persists to Cloud Supabase
+================================================================================

@@ -1,0 +1,9 @@
+node_modules/
+backend/node_modules/
+manzor-traders/node_modules/
+manzor-traders/dist/
+.env
+backend/.env
+manzor-traders/.env
+*.log
+.DS_Store
