@@ -26,7 +26,7 @@ router.post("/", async (req, res) => {
       String(f.name || "").trim(),
       f.category || null,
       Number(f.salePrice) || 0,
-      Number(f.costPrice) || 0,
+      Number(f.stockPrice ?? f.costPrice) || 0,
       Number(f.costPrice) || 0,
       Number(f.lowStockAlertQty) || 0,
       Number(f.currentStock) || 0,
@@ -42,16 +42,17 @@ router.put("/:id", async (req, res) => {
   const { rows } = await pool.query(
     `UPDATE products SET
       name=$1, category=$2, sale_price=$3, stock_price=$4, cost_price=$5,
-      low_stock_alert_qty=$6, ctn=$7, updated_at=now()
-     WHERE id=$8 AND firebase_uid=$9
+      low_stock_alert_qty=$6, current_stock=$7, ctn=$8, updated_at=now()
+     WHERE id=$9 AND firebase_uid=$10
      RETURNING *`,
     [
       String(f.name || "").trim(),
       f.category || null,
       Number(f.salePrice) || 0,
-      Number(f.costPrice) || 0,
+      Number(f.stockPrice ?? f.costPrice) || 0,
       Number(f.costPrice) || 0,
       Number(f.lowStockAlertQty) || 0,
+      Number(f.currentStock) || 0,
       Number(f.ctn) || 0,
       req.params.id,
       req.uid,
