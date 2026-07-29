@@ -60,7 +60,10 @@ export default function ProductsView({
   const filteredProducts = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return products.filter((p) => {
-      const matchesSearch = !query || p.name.toLowerCase().includes(query) || p.category.toLowerCase().includes(query);
+      const matchesSearch =
+        !query ||
+        (p.name || "").toLowerCase().includes(query) ||
+        (p.category || "").toLowerCase().includes(query);
       const status = getStockStatus(p);
       const matchesFilter = stockFilter === "all" || status === stockFilter;
       return matchesSearch && matchesFilter;

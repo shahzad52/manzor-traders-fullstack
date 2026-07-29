@@ -3,8 +3,8 @@ export const num = (v) => (v === null || v === undefined ? 0 : Number(v));
 export function mapProduct(row) {
   return {
     id: row.id,
-    name: row.name,
-    category: row.category,
+    name: row.name || "",
+    category: row.category || "Others",
     salePrice: num(row.sale_price),
     stockPrice: num(row.stock_price),
     costPrice: num(row.cost_price),

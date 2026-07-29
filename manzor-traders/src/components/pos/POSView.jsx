@@ -29,7 +29,10 @@ export default function POSView({ products, posStats, completeSale, recordSale, 
   const filteredProducts = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return products.filter((p) => {
-      const matchSearch = !q || p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q);
+      const matchSearch =
+        !q ||
+        (p.name || "").toLowerCase().includes(q) ||
+        (p.category || "").toLowerCase().includes(q);
       const matchCat = categoryFilter === "all" || p.category === categoryFilter;
       return matchSearch && matchCat;
     });
