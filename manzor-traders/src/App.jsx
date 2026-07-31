@@ -1,13 +1,5 @@
 import { useState, useEffect } from "react";
-import { initializeApp } from "firebase/app";
-import {
-  getAuth, onAuthStateChanged, signOut as firebaseSignOut,
-  signInWithEmailAndPassword, createUserWithEmailAndPassword,
-  GoogleAuthProvider, signInWithPopup, updateProfile,
-  updatePassword, reauthenticateWithCredential, EmailAuthProvider,
-  sendPasswordResetEmail
-} from "firebase/auth";
-import { setIdTokenProvider } from "./api/client";
+import { supabase } from "./api/client";
 
 import Sidebar from "./components/layout/Sidebar";
 import Topbar from "./components/layout/Topbar";
@@ -21,26 +13,6 @@ import SettingsView from "./components/settings/SettingsView";
 import UserProfileView from "./components/profile/UserProfileView";
 import LoginView from "./components/auth/LoginView";
 import { useProducts } from "./hooks/useProducts";
-
-// ── Firebase init ──────────────────────────────────────────────────────────
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
-};
-// Firebase is used ONLY for authentication here — all app data (products, sales,
-// invoices, customers, settings) lives in PostgreSQL via the Express backend.
-const firebaseApp = initializeApp(firebaseConfig);
-const auth = getAuth(firebaseApp);
-
-// Give the backend API client a way to fetch a fresh Firebase ID token for
-// every request (it verifies this token server-side, then reads/writes Postgres).
-setIdTokenProvider(() => (auth.currentUser ? auth.currentUser.getIdToken() : Promise.resolve(null)));
 
 export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -62,16 +34,30 @@ export default function App() {
     restoreBackup,
   } = useProducts(currentUser?.uid);
 
-  // ── Auth state listener ─────────────────────────────────────────────────
+  // ── Auth state listener (Supabase) ─────────────────────────────────────────
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (user) => {
-      if (user) {
+    // Get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
         setCurrentUser({
-          name: user.displayName || user.email?.split("@")[0] || "User",
-          email: user.email,
-          loginMethod: user.providerData[0]?.providerId === "google.com" ? "google" : "email",
-          uid: user.uid,
-          photoURL: user.photoURL,
+          name: session.user.user_metadata?.full_name || session.user.email?.split("@")[0] || "User",
+          email: session.user.email,
+          uid: session.user.id,
+          photoURL: session.user.user_metadata?.avatar_url || null,
+        });
+        setActiveNav("Dashboard");
+      }
+      setAuthLoading(false);
+    });
+
+    // Listen for auth changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setCurrentUser({
+          name: session.user.user_metadata?.full_name || session.user.email?.split("@")[0] || "User",
+          email: session.user.email,
+          uid: session.user.id,
+          photoURL: session.user.user_metadata?.avatar_url || null,
         });
         setActiveNav("Dashboard");
       } else {
@@ -79,36 +65,48 @@ export default function App() {
       }
       setAuthLoading(false);
     });
-    return unsub;
+
+    return () => subscription.unsubscribe();
   }, []);
 
   // ── Auth handlers ───────────────────────────────────────────────────────
-  const handleEmailLogin = (email, password) =>
-    signInWithEmailAndPassword(auth, email, password);
-
-  const handleEmailRegister = async (email, password, name) => {
-    const cred = await createUserWithEmailAndPassword(auth, email, password);
-    if (name) await updateProfile(cred.user, { displayName: name });
-    return cred;
+  const handleEmailLogin = async (email, password) => {
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
   };
 
-  const handleGoogleLogin = () =>
-    signInWithPopup(auth, new GoogleAuthProvider());
+  const handleEmailRegister = async (email, password, name) => {
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { full_name: name } },
+    });
+    if (error) throw error;
+  };
 
-  const handleForgotPassword = (email) =>
-    sendPasswordResetEmail(auth, email);
+  const handleGoogleLogin = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: window.location.origin },
+    });
+    if (error) throw error;
+  };
+
+  const handleForgotPassword = async (email) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    if (error) throw error;
+  };
 
   const handleLogout = async () => {
-    await firebaseSignOut(auth);
+    await supabase.auth.signOut();
     setActiveNav("Dashboard");
   };
 
-  const handleUpdatePassword = async (currentPassword, newPassword) => {
-    const user = auth.currentUser;
-    if (!user) throw new Error("Not logged in");
-    const credential = EmailAuthProvider.credential(user.email, currentPassword);
-    await reauthenticateWithCredential(user, credential);
-    await updatePassword(user, newPassword);
+  const handleUpdatePassword = async (_currentPassword, newPassword) => {
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw error;
   };
 
   // ── Loading screen ──────────────────────────────────────────────────────

@@ -1,18 +1,22 @@
-// Talks to the Node/Express + PostgreSQL backend.
-// Firebase is used ONLY to authenticate the user — every ID token is sent
-// to the backend, which verifies it and then reads/writes PostgreSQL.
+import { createClient } from "@supabase/supabase-js";
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:4000";
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Set from App.jsx once Firebase auth is initialized, so this client can
-// always attach a fresh ID token without importing firebase/auth here.
-let getIdTokenFn = null;
-export function setIdTokenProvider(fn) {
-  getIdTokenFn = fn;
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error("Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY in environment variables.");
 }
 
+export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+
+// ── API client (talks to Express backend) ────────────────────────────────────
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:4000";
+
 async function request(path, { method = "GET", body } = {}) {
-  const token = getIdTokenFn ? await getIdTokenFn() : null;
+  // Get fresh Supabase session token for every request
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token || null;
+
   const res = await fetch(`${API_BASE}${path}`, {
     method,
     headers: {
@@ -42,3 +46,6 @@ export const api = {
   put: (path, body) => request(path, { method: "PUT", body }),
   delete: (path) => request(path, { method: "DELETE" }),
 };
+
+// Legacy shim — no longer needed but kept for compatibility
+export function setIdTokenProvider() {}

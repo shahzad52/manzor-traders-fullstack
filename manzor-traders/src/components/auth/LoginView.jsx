@@ -19,19 +19,21 @@ export default function LoginView({ onEmailLogin, onEmailRegister, onGoogleLogin
     return e;
   };
 
-  const firebaseErrorMsg = (code) => {
-    const map = {
-      "auth/user-not-found": "No account found with this email",
-      "auth/wrong-password": "Incorrect password",
-      "auth/invalid-credential": "Invalid email or password",
-      "auth/email-already-in-use": "Email is already registered",
-      "auth/invalid-email": "Invalid email address",
-      "auth/weak-password": "Password is too weak (min 6 chars)",
-      "auth/too-many-requests": "Too many attempts — try again later",
-      "auth/popup-closed-by-user": "Google sign-in was cancelled",
-      "auth/network-request-failed": "Network error — check your connection",
-    };
-    return map[code] || "Something went wrong. Please try again.";
+  const authErrorMsg = (err) => {
+    const msg = err?.message?.toLowerCase() || "";
+    if (msg.includes("invalid login credentials") || msg.includes("invalid email or password"))
+      return "Incorrect email or password";
+    if (msg.includes("email not confirmed"))
+      return "Please verify your email before signing in";
+    if (msg.includes("user already registered") || msg.includes("already been registered"))
+      return "Email is already registered";
+    if (msg.includes("password should be"))
+      return "Password is too weak (min 6 characters)";
+    if (msg.includes("rate limit") || msg.includes("too many requests"))
+      return "Too many attempts — try again later";
+    if (msg.includes("network") || msg.includes("fetch"))
+      return "Network error — check your connection";
+    return err?.message || "Something went wrong. Please try again.";
   };
 
   const handleSubmit = async () => {
@@ -46,7 +48,7 @@ export default function LoginView({ onEmailLogin, onEmailRegister, onGoogleLogin
         await onEmailRegister(form.email, form.password, form.name);
       }
     } catch (err) {
-      setErrors({ general: firebaseErrorMsg(err.code) });
+      setErrors({ general: authErrorMsg(err) });
     } finally {
       setLoading(false);
     }
@@ -58,7 +60,7 @@ export default function LoginView({ onEmailLogin, onEmailRegister, onGoogleLogin
     try {
       await onGoogleLogin();
     } catch (err) {
-      setErrors({ general: firebaseErrorMsg(err.code) });
+      setErrors({ general: authErrorMsg(err) });
     } finally {
       setGoogleLoading(false);
     }
@@ -75,7 +77,7 @@ export default function LoginView({ onEmailLogin, onEmailRegister, onGoogleLogin
       await onForgotPassword(forgotEmail);
       setForgotSent(true);
     } catch (err) {
-      setErrors({ general: firebaseErrorMsg(err.code) });
+      setErrors({ general: authErrorMsg(err) });
     } finally {
       setLoading(false);
     }
