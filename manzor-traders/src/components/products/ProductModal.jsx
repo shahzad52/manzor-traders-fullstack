@@ -4,6 +4,7 @@ import { emptyProductForm } from "../../utils/productHelpers";
 export default function ProductModal({ open, onClose, onSave, editingProduct, categories = [] }) {
   const [form, setForm] = useState(emptyProductForm);
   const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (editingProduct) {
@@ -28,7 +29,7 @@ export default function ProductModal({ open, onClose, onSave, editingProduct, ca
     setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.name.trim()) {
       setError("Product name is required.");
@@ -38,8 +39,16 @@ export default function ProductModal({ open, onClose, onSave, editingProduct, ca
       setError("Sale price and cost price are required.");
       return;
     }
-    onSave(form);
-    onClose();
+    try {
+      setSaving(true);
+      setError("");
+      await onSave(form);
+      onClose();
+    } catch (err) {
+      setError(err.message || "Failed to save product. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   // Use passed categories; if empty fall back to a sensible default
@@ -121,16 +130,16 @@ export default function ProductModal({ open, onClose, onSave, editingProduct, ca
 
           <div className="flex gap-3 pt-2">
             <button
-              type="button" onClick={onClose}
-              className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50"
+              type="button" onClick={onClose} disabled={saving}
+              className="flex-1 py-2.5 rounded-xl border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-50"
             >
               Cancel
             </button>
             <button
-              type="submit"
-              className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 shadow-md shadow-blue-200"
+              type="submit" disabled={saving}
+              className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 shadow-md shadow-blue-200 disabled:opacity-60"
             >
-              {editingProduct ? "Save Changes" : "Add Product"}
+              {saving ? "Saving..." : (editingProduct ? "Save Changes" : "Add Product")}
             </button>
           </div>
         </form>
