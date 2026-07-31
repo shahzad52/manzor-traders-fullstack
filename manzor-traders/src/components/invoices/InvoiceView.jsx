@@ -125,15 +125,6 @@ export default function InvoiceView({ products, invoices, onCreateInvoice, onUpd
   }, [invoices]);
 
   const handleCreate = async (data) => {
-    // Reduce stock for any items that have a productId (from product list)
-    if (onReduceStock && data.items) {
-      const stockItems = data.items
-        .filter((i) => i.productId)
-        .map((i) => ({ productId: String(i.productId), qty: Number(i.qty) }));
-      if (stockItems.length > 0) {
-        await onReduceStock(stockItems);
-      }
-    }
     await onCreateInvoice(data);
     setShowForm(false);
   };

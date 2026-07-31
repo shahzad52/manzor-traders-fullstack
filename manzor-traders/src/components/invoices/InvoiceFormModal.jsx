@@ -204,9 +204,8 @@ export default function InvoiceFormModal({ products, existingInvoice, prefillCus
       // Note: on success the parent normally closes this modal (setShowForm(false)),
       // which unmounts us — no need to reset isSaving in that case.
     } catch (err) {
-      // If saving failed, unlock so the user can retry.
       setIsSaving(false);
-      throw err;
+      alert(err.message || "Failed to save invoice");
     }
   };
 

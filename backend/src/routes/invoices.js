@@ -59,11 +59,26 @@ router.post("/sales", async (req, res) => {
         ? [{ amount: Number(sale.advance), date: new Date().toISOString(), note: "Advance at sale" }]
         : [];
 
+    const extra = {
+      customerName: sale.customerName || "",
+      customerPhone: sale.customerPhone || "",
+      customerAddress: sale.customerAddress || "",
+      notes: sale.notes || "",
+      subtotal: Number(sale.subtotal) || 0,
+      discount: Number(sale.discount) || 0,
+      tax: Number(sale.tax) || 0,
+      discountPercent: Number(sale.discountPercent) || 0,
+      taxPercent: Number(sale.taxPercent) || 0,
+      totalCost: Number(sale.totalCost) || 0,
+      grossProfit: Number(sale.grossProfit) || 0,
+      profitMargin: Number(sale.profitMargin) || 0,
+    };
+
     const { rows } = await client.query(
       `INSERT INTO sales
         (firebase_uid, invoice_number, customer_id, items, total, advance, payment_mode, payment_status, payments,
-         previous_udaar, show_previous_udaar_on_invoice, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, COALESCE($12, now()))
+         previous_udaar, show_previous_udaar_on_invoice, extra, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, COALESCE($13, now()))
        RETURNING *`,
       [
         req.uid,
@@ -77,6 +92,7 @@ router.post("/sales", async (req, res) => {
         JSON.stringify(payments),
         Number(sale.previousUdaar) || 0,
         Boolean(sale.showPreviousUdaarOnInvoice),
+        JSON.stringify(extra),
         sale.createdAt || null,
       ]
     );
@@ -110,11 +126,37 @@ router.post("/manual", async (req, res) => {
         ? [{ amount: Number(data.advance), date: new Date().toISOString(), note: "Advance at sale" }]
         : [];
 
+    // Deduct stock for inventory items
+    for (const item of data.items || []) {
+      if (item.productId) {
+        await client.query(
+          `UPDATE products SET current_stock = GREATEST(0, current_stock - $1), updated_at = now()
+           WHERE id=$2 AND firebase_uid=$3`,
+          [Number(item.qty) || 0, item.productId, req.uid]
+        );
+      }
+    }
+
+    const extra = {
+      customerName: data.customerName || "",
+      customerPhone: data.customerPhone || "",
+      customerAddress: data.customerAddress || "",
+      notes: data.notes || "",
+      subtotal: Number(data.subtotal) || 0,
+      discount: Number(data.discount) || 0,
+      tax: Number(data.tax) || 0,
+      discountPercent: Number(data.discountPercent) || 0,
+      taxPercent: Number(data.taxPercent) || 0,
+      totalCost: Number(data.totalCost) || 0,
+      grossProfit: Number(data.grossProfit) || 0,
+      profitMargin: Number(data.profitMargin) || 0,
+    };
+
     const { rows } = await client.query(
       `INSERT INTO manual_invoices
         (firebase_uid, invoice_number, customer_id, items, total, advance, payment_mode, payment_status, payments,
-         previous_udaar, show_previous_udaar_on_invoice, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11, COALESCE($12, now()))
+         previous_udaar, show_previous_udaar_on_invoice, extra, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, COALESCE($13, now()))
        RETURNING *`,
       [
         req.uid,
@@ -128,6 +170,7 @@ router.post("/manual", async (req, res) => {
         JSON.stringify(payments),
         Number(data.previousUdaar) || 0,
         Boolean(data.showPreviousUdaarOnInvoice),
+        JSON.stringify(extra),
         data.createdAt || null,
       ]
     );
@@ -140,7 +183,7 @@ router.post("/manual", async (req, res) => {
     res.status(201).json(mapInvoice(rows[0], "manual"));
   } catch (err) {
     await client.query("ROLLBACK");
-    console.error(err);
+    console.error("Manual invoice creation error:", err);
     res.status(500).json({ error: "Failed to create invoice" });
   } finally {
     client.release();
@@ -152,6 +195,22 @@ router.put("/:id", async (req, res) => {
   const source = req.query.source === "manual" ? "manual" : "pos";
   const table = tableFor(source);
   const data = req.body;
+
+  const extra = {
+    customerName: data.customerName || "",
+    customerPhone: data.customerPhone || "",
+    customerAddress: data.customerAddress || "",
+    notes: data.notes || "",
+    subtotal: Number(data.subtotal) || 0,
+    discount: Number(data.discount) || 0,
+    tax: Number(data.tax) || 0,
+    discountPercent: Number(data.discountPercent) || 0,
+    taxPercent: Number(data.taxPercent) || 0,
+    totalCost: Number(data.totalCost) || 0,
+    grossProfit: Number(data.grossProfit) || 0,
+    profitMargin: Number(data.profitMargin) || 0,
+  };
+
   const { rows } = await pool.query(
     `UPDATE ${table} SET
        items = COALESCE($1, items),
@@ -161,8 +220,9 @@ router.put("/:id", async (req, res) => {
        payment_status = COALESCE($5, payment_status),
        customer_id = COALESCE($6, customer_id),
        invoice_number = COALESCE($7, invoice_number),
+       extra = COALESCE(extra, '{}'::jsonb) || $8::jsonb,
        updated_at = now()
-     WHERE id=$8 AND firebase_uid=$9
+     WHERE id=$9 AND firebase_uid=$10
      RETURNING *`,
     [
       data.items ? JSON.stringify(data.items) : null,
@@ -172,6 +232,7 @@ router.put("/:id", async (req, res) => {
       data.paymentStatus || null,
       data.customerId || null,
       data.invoiceNumber !== undefined ? data.invoiceNumber : null,
+      JSON.stringify(extra),
       req.params.id,
       req.uid,
     ]
