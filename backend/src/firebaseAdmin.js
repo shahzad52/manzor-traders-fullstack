@@ -1,20 +1,20 @@
-import jwt from "jsonwebtoken";
+import { createClient } from "@supabase/supabase-js";
 import "dotenv/config";
 
-// Supabase signs all JWT tokens with a secret available in:
-// Supabase Dashboard → Project Settings → API → JWT Settings → JWT Secret
-const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET;
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.error("SUPABASE_URL or SUPABASE_ANON_KEY is not set in environment variables.");
+}
+
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 /**
- * Express middleware: verifies the Supabase JWT token sent as
- * "Authorization: Bearer <token>" and attaches req.uid (Supabase user UUID).
+ * Express middleware: verifies the Supabase JWT token using the Supabase Client.
+ * Attaches req.uid (Supabase user UUID) and req.userEmail.
  */
 export async function requireAuth(req, res, next) {
-  if (!SUPABASE_JWT_SECRET) {
-    console.error("SUPABASE_JWT_SECRET is not set in environment variables.");
-    return res.status(500).json({ error: "Server auth misconfiguration" });
-  }
-
   const header = req.headers.authorization || "";
   const token = header.startsWith("Bearer ") ? header.slice(7) : null;
 
@@ -23,9 +23,12 @@ export async function requireAuth(req, res, next) {
   }
 
   try {
-    const decoded = jwt.verify(token, SUPABASE_JWT_SECRET);
-    req.uid = decoded.sub; // Supabase user UUID (same format as firebase_uid)
-    req.userEmail = decoded.email || null;
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) {
+      throw new Error(error?.message || "User not found");
+    }
+    req.uid = user.id; // Supabase user UUID
+    req.userEmail = user.email || null;
     next();
   } catch (err) {
     console.error("Supabase JWT verification failed:", err.message);
