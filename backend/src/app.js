@@ -8,6 +8,8 @@ import { mapProduct, mapCustomer, mapInvoice, mapSettings } from "./utils/mapper
 import productsRouter from "./routes/products.js";
 import customersRouter from "./routes/customers.js";
 import invoicesRouter from "./routes/invoices.js";
+import posRouter from "./routes/pos.js";
+import reportsRouter from "./routes/reports.js";
 import settingsRouter, { ensureSettingsRow } from "./routes/settings.js";
 import backupRouter from "./routes/backup.js";
 
@@ -18,17 +20,18 @@ app.use(express.json({ limit: "15mb" })); // logo/base64 uploads can be large-is
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
-// Every /api/* route requires a valid Firebase ID token (authentication only —
-// no data is read from or written to Firebase; everything below hits PostgreSQL).
+// Every /api/* route requires a valid Supabase JWT token
 app.use("/api", requireAuth);
 
 app.use("/api/products", productsRouter);
 app.use("/api/customers", customersRouter);
 app.use("/api/invoices", invoicesRouter);
+app.use("/api/pos", posRouter);
+app.use("/api/reports", reportsRouter);
 app.use("/api/settings", settingsRouter);
 app.use("/api/backup", backupRouter);
 
-// Bootstrap: one call that returns everything the frontend needs on load
+// Bootstrap: lightweight/legacy call that returns everything the frontend needs on load
 app.get("/api/bootstrap", async (req, res, next) => {
   try {
     const [products, customers, sales, manual, settingsRow] = await Promise.all([

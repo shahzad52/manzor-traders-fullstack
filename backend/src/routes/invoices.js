@@ -9,19 +9,20 @@ function tableFor(source) {
   return source === "manual" ? "manual_invoices" : "sales";
 }
 
-// GET /api/invoices  -> { sales: [...], manualInvoices: [...] }
-router.get("/", async (req, res) => {
-  const [sales, manual] = await Promise.all([
-    pool.query("SELECT * FROM sales WHERE firebase_uid=$1 ORDER BY created_at DESC", [req.uid]),
-    pool.query("SELECT * FROM manual_invoices WHERE firebase_uid=$1 ORDER BY created_at DESC", [req.uid]),
-  ]);
-  res.json({
-    sales: sales.rows.map((r) => mapInvoice(r, "pos")),
-    manualInvoices: manual.rows.map((r) => mapInvoice(r, "manual")),
-  });
+// GET /api/invoices - get all manual/custom invoices
+router.get("/", async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      "SELECT * FROM manual_invoices WHERE firebase_uid=$1 ORDER BY created_at DESC",
+      [req.uid]
+    );
+    res.json(rows.map((r) => mapInvoice(r, "manual")));
+  } catch (err) {
+    next(err);
+  }
 });
 
-// Atomically reserve the next invoice number (replaces Firestore runTransaction)
+// Helper: reserve the next invoice number
 async function getNextInvoiceNumber(client, uid) {
   await ensureSettingsRow(uid);
   const { rows } = await client.query(
@@ -32,6 +33,7 @@ async function getNextInvoiceNumber(client, uid) {
   return rows[0].invoice_counter;
 }
 
+// Helper: update customer total spent and order counts
 async function bumpCustomerStats(client, uid, customerId, deltaOrders, deltaSpent, lastOrder) {
   if (!customerId) return;
   await client.query(
@@ -45,75 +47,8 @@ async function bumpCustomerStats(client, uid, customerId, deltaOrders, deltaSpen
   );
 }
 
-// POST /api/invoices/sales  (recordSale — POS)
-router.post("/sales", async (req, res) => {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    const sale = req.body;
-    const counter = await getNextInvoiceNumber(client, req.uid);
-    const paymentStatus =
-      sale.paymentMode === "udaar" ? (Number(sale.advance) > 0 ? "partial" : "udaar") : "paid";
-    const payments =
-      sale.paymentMode === "udaar" && Number(sale.advance) > 0
-        ? [{ amount: Number(sale.advance), date: new Date().toISOString(), note: "Advance at sale" }]
-        : [];
-
-    const extra = {
-      customerName: sale.customerName || "",
-      customerPhone: sale.customerPhone || "",
-      customerAddress: sale.customerAddress || "",
-      notes: sale.notes || "",
-      subtotal: Number(sale.subtotal) || 0,
-      discount: Number(sale.discount) || 0,
-      tax: Number(sale.tax) || 0,
-      discountPercent: Number(sale.discountPercent) || 0,
-      taxPercent: Number(sale.taxPercent) || 0,
-      totalCost: Number(sale.totalCost) || 0,
-      grossProfit: Number(sale.grossProfit) || 0,
-      profitMargin: Number(sale.profitMargin) || 0,
-    };
-
-    const { rows } = await client.query(
-      `INSERT INTO sales
-        (firebase_uid, invoice_number, customer_id, items, total, advance, payment_mode, payment_status, payments,
-         previous_udaar, show_previous_udaar_on_invoice, extra, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, COALESCE($13, now()))
-       RETURNING *`,
-      [
-        req.uid,
-        counter,
-        sale.customerId || null,
-        JSON.stringify(sale.items || []),
-        Number(sale.total) || 0,
-        Number(sale.advance) || 0,
-        sale.paymentMode || null,
-        paymentStatus,
-        JSON.stringify(payments),
-        Number(sale.previousUdaar) || 0,
-        Boolean(sale.showPreviousUdaarOnInvoice),
-        JSON.stringify(extra),
-        sale.createdAt || null,
-      ]
-    );
-
-    if (sale.customerId) {
-      await bumpCustomerStats(client, req.uid, sale.customerId, 1, Number(sale.total) || 0, new Date().toISOString());
-    }
-
-    await client.query("COMMIT");
-    res.status(201).json(mapInvoice(rows[0], "pos"));
-  } catch (err) {
-    await client.query("ROLLBACK");
-    console.error(err);
-    res.status(500).json({ error: "Failed to record sale" });
-  } finally {
-    client.release();
-  }
-});
-
-// POST /api/invoices/manual  (createManualInvoice)
-router.post("/manual", async (req, res) => {
+// POST /api/invoices/manual - create a manual invoice
+router.post("/manual", async (req, res, next) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -183,66 +118,69 @@ router.post("/manual", async (req, res) => {
     res.status(201).json(mapInvoice(rows[0], "manual"));
   } catch (err) {
     await client.query("ROLLBACK");
-    console.error("Manual invoice creation error:", err);
-    res.status(500).json({ error: "Failed to create invoice" });
+    next(err);
   } finally {
     client.release();
   }
 });
 
-// PUT /api/invoices/:id?source=pos|manual  (updateInvoice)
-router.put("/:id", async (req, res) => {
-  const source = req.query.source === "manual" ? "manual" : "pos";
-  const table = tableFor(source);
-  const data = req.body;
+// PUT /api/invoices/:id?source=pos|manual - update an invoice (sale or manual invoice)
+router.put("/:id", async (req, res, next) => {
+  try {
+    const source = req.query.source === "manual" ? "manual" : "pos";
+    const table = tableFor(source);
+    const data = req.body;
 
-  const extra = {
-    customerName: data.customerName || "",
-    customerPhone: data.customerPhone || "",
-    customerAddress: data.customerAddress || "",
-    notes: data.notes || "",
-    subtotal: Number(data.subtotal) || 0,
-    discount: Number(data.discount) || 0,
-    tax: Number(data.tax) || 0,
-    discountPercent: Number(data.discountPercent) || 0,
-    taxPercent: Number(data.taxPercent) || 0,
-    totalCost: Number(data.totalCost) || 0,
-    grossProfit: Number(data.grossProfit) || 0,
-    profitMargin: Number(data.profitMargin) || 0,
-  };
+    const extra = {
+      customerName: data.customerName || "",
+      customerPhone: data.customerPhone || "",
+      customerAddress: data.customerAddress || "",
+      notes: data.notes || "",
+      subtotal: Number(data.subtotal) || 0,
+      discount: Number(data.discount) || 0,
+      tax: Number(data.tax) || 0,
+      discountPercent: Number(data.discountPercent) || 0,
+      taxPercent: Number(data.taxPercent) || 0,
+      totalCost: Number(data.totalCost) || 0,
+      grossProfit: Number(data.grossProfit) || 0,
+      profitMargin: Number(data.profitMargin) || 0,
+    };
 
-  const { rows } = await pool.query(
-    `UPDATE ${table} SET
-       items = COALESCE($1, items),
-       total = COALESCE($2, total),
-       advance = COALESCE($3, advance),
-       payment_mode = COALESCE($4, payment_mode),
-       payment_status = COALESCE($5, payment_status),
-       customer_id = COALESCE($6, customer_id),
-       invoice_number = COALESCE($7, invoice_number),
-       extra = COALESCE(extra, '{}'::jsonb) || $8::jsonb,
-       updated_at = now()
-     WHERE id=$9 AND firebase_uid=$10
-     RETURNING *`,
-    [
-      data.items ? JSON.stringify(data.items) : null,
-      data.total !== undefined ? Number(data.total) : null,
-      data.advance !== undefined ? Number(data.advance) : null,
-      data.paymentMode || null,
-      data.paymentStatus || null,
-      data.customerId || null,
-      data.invoiceNumber !== undefined ? data.invoiceNumber : null,
-      JSON.stringify(extra),
-      req.params.id,
-      req.uid,
-    ]
-  );
-  if (!rows.length) return res.status(404).json({ error: "Invoice not found" });
-  res.json(mapInvoice(rows[0], source));
+    const { rows } = await pool.query(
+      `UPDATE ${table} SET
+         items = COALESCE($1, items),
+         total = COALESCE($2, total),
+         advance = COALESCE($3, advance),
+         payment_mode = COALESCE($4, payment_mode),
+         payment_status = COALESCE($5, payment_status),
+         customer_id = COALESCE($6, customer_id),
+         invoice_number = COALESCE($7, invoice_number),
+         extra = COALESCE(extra, '{}'::jsonb) || $8::jsonb,
+         updated_at = now()
+       WHERE id=$9 AND firebase_uid=$10
+       RETURNING *`,
+      [
+        data.items ? JSON.stringify(data.items) : null,
+        data.total !== undefined ? Number(data.total) : null,
+        data.advance !== undefined ? Number(data.advance) : null,
+        data.paymentMode || null,
+        data.paymentStatus || null,
+        data.customerId || null,
+        data.invoiceNumber !== undefined ? data.invoiceNumber : null,
+        JSON.stringify(extra),
+        req.params.id,
+        req.uid,
+      ]
+    );
+    if (!rows.length) return res.status(404).json({ error: "Invoice not found" });
+    res.json(mapInvoice(rows[0], source));
+  } catch (err) {
+    next(err);
+  }
 });
 
-// DELETE /api/invoices/:id?source=pos|manual  (deleteInvoice — restores stock & customer stats)
-router.delete("/:id", async (req, res) => {
+// DELETE /api/invoices/:id?source=pos|manual - delete a manual invoice and restore stock/stats
+router.delete("/:id", async (req, res, next) => {
   const source = req.query.source === "manual" ? "manual" : "pos";
   const table = tableFor(source);
   const client = await pool.connect();
@@ -260,7 +198,7 @@ router.delete("/:id", async (req, res) => {
 
     await client.query(`DELETE FROM ${table} WHERE id=$1 AND firebase_uid=$2`, [req.params.id, req.uid]);
 
-    // Restore stock for items that came from inventory
+    // Restore stock for items
     const items = inv.items || [];
     for (const item of items) {
       if (item.productId) {
@@ -281,16 +219,14 @@ router.delete("/:id", async (req, res) => {
     res.status(204).end();
   } catch (err) {
     await client.query("ROLLBACK");
-    console.error(err);
-    res.status(500).json({ error: "Failed to delete invoice" });
+    next(err);
   } finally {
     client.release();
   }
 });
 
 // POST /api/invoices/receive-payment
-// body: { customerId, allocations: [{ invoiceId, source, amount }], date, note }
-router.post("/receive-payment", async (req, res) => {
+router.post("/receive-payment", async (req, res, next) => {
   const { allocations = [], date, note } = req.body;
   const client = await pool.connect();
   try {
@@ -335,41 +271,7 @@ router.post("/receive-payment", async (req, res) => {
     res.json({ success: true });
   } catch (err) {
     await client.query("ROLLBACK");
-    console.error(err);
-    res.status(500).json({ error: "Failed to record payment" });
-  } finally {
-    client.release();
-  }
-});
-
-// POST /api/invoices/complete-sale  { items: [{productId, qty}] }  — stock deduction only (used by POS/Invoices views)
-router.post("/complete-sale", async (req, res) => {
-  const { items = [] } = req.body;
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    for (const { productId, qty } of items) {
-      const { rows } = await client.query(
-        "SELECT current_stock FROM products WHERE id=$1 AND firebase_uid=$2 FOR UPDATE",
-        [productId, req.uid]
-      );
-      if (!rows.length || num(rows[0].current_stock) < qty) {
-        await client.query("ROLLBACK");
-        return res.json({ success: false });
-      }
-    }
-    for (const { productId, qty } of items) {
-      await client.query(
-        "UPDATE products SET current_stock = current_stock - $1, updated_at = now() WHERE id=$2 AND firebase_uid=$3",
-        [qty, productId, req.uid]
-      );
-    }
-    await client.query("COMMIT");
-    res.json({ success: true });
-  } catch (err) {
-    await client.query("ROLLBACK");
-    console.error(err);
-    res.status(500).json({ success: false, error: "Failed to complete sale" });
+    next(err);
   } finally {
     client.release();
   }

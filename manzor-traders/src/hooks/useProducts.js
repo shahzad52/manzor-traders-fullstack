@@ -3,7 +3,7 @@ import { PRODUCT_CATEGORIES } from "../data/mockData";
 import { buildStockAlerts, getStockStatus } from "../utils/productHelpers";
 import { api } from "../api/client";
 
-// ── IndexedDB helpers for logo (unchanged — logo stays in the browser, same as before) ──
+// ── IndexedDB helpers for logo (unchanged) ──
 function openLogoIDB() {
   return new Promise((res, rej) => {
     const r = indexedDB.open("inv_settings", 1);
@@ -35,8 +35,6 @@ async function saveLogoToIDB(logoData) {
 }
 
 // ── Hook ─────────────────────────────────────────────────────────────────────
-// All data now lives in PostgreSQL, served by the Express backend at VITE_API_URL.
-// `uid` is only used to know whether the user is logged in / to re-fetch on login.
 export function useProducts(uid) {
   const [products, setProducts] = useState([]);
   const [sales, setSales] = useState([]);
@@ -47,26 +45,70 @@ export function useProducts(uid) {
   const [customers, setCustomers] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // ── Bootstrap: load everything once the user is logged in ───────────────
-  const refreshAll = useCallback(async () => {
+  // ── Modular Refresh Actions ────────────────────────────────────────────────
+  const refreshProducts = useCallback(async () => {
     if (!uid) return;
-    const data = await api.get("/api/bootstrap");
-    setProducts(data.products || []);
-    setSales(data.sales || []);
-    setManualInvoices(data.manualInvoices || []);
-    setCustomers(data.customers || []);
-    if (data.settings) {
-      setAppSettings(data.settings.appSettings || { appName: "InvManager", tagline: "Pro Dashboard" });
-      setCategories(data.settings.categories?.length ? data.settings.categories : PRODUCT_CATEGORIES);
-      const inv = data.settings.invoiceSettings || {};
-      if (inv.logo === "__local__") {
-        const logoData = await loadLogoFromIDB();
-        setInvoiceSettings({ ...inv, logo: logoData || "" });
-      } else {
-        setInvoiceSettings(inv);
-      }
+    try {
+      const data = await api.get("/api/products");
+      setProducts(data || []);
+    } catch (e) {
+      console.error("Failed to refresh products:", e);
     }
   }, [uid]);
+
+  const refreshCustomers = useCallback(async () => {
+    if (!uid) return;
+    try {
+      const data = await api.get("/api/customers");
+      setCustomers(data || []);
+    } catch (e) {
+      console.error("Failed to refresh customers:", e);
+    }
+  }, [uid]);
+
+  const refreshInvoices = useCallback(async () => {
+    if (!uid) return;
+    try {
+      const [manualData, salesData] = await Promise.all([
+        api.get("/api/invoices"),
+        api.get("/api/pos"),
+      ]);
+      setManualInvoices(manualData || []);
+      setSales(salesData || []);
+    } catch (e) {
+      console.error("Failed to refresh invoices:", e);
+    }
+  }, [uid]);
+
+  const refreshSettings = useCallback(async () => {
+    if (!uid) return;
+    try {
+      const data = await api.get("/api/settings");
+      if (data) {
+        setAppSettings(data.appSettings || { appName: "InvManager", tagline: "Pro Dashboard" });
+        setCategories(data.categories?.length ? data.categories : PRODUCT_CATEGORIES);
+        const inv = data.invoiceSettings || {};
+        if (inv.logo === "__local__") {
+          const logoData = await loadLogoFromIDB();
+          setInvoiceSettings({ ...inv, logo: logoData || "" });
+        } else {
+          setInvoiceSettings(inv);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to refresh settings:", e);
+    }
+  }, [uid]);
+
+  const refreshAll = useCallback(async () => {
+    if (!uid) return;
+    await Promise.all([
+      refreshProducts(),
+      refreshCustomers(),
+      refreshInvoices(),
+      refreshSettings(),
+    ]);
+  }, [uid, refreshProducts, refreshCustomers, refreshInvoices, refreshSettings]);
 
   useEffect(() => {
     if (!uid) {
@@ -161,27 +203,37 @@ export function useProducts(uid) {
   const completeSale = useCallback(async (items) => {
     if (!items?.length) return { success: false };
     try {
-      const result = await api.post("/api/invoices/complete-sale", { items });
-      if (result.success) await refreshAll();
+      const result = await api.post("/api/pos/complete-sale", { items });
+      if (result.success) {
+        await refreshProducts(); // stock updated
+      }
       return result;
     } catch {
       return { success: false };
     }
-  }, [refreshAll]);
+  }, [refreshProducts]);
 
   const recordSale = useCallback(async (sale) => {
-    const created = await api.post("/api/invoices/sales", sale);
+    const created = await api.post("/api/pos/sales", sale);
     setSales((prev) => [created, ...prev]);
-    if (sale.customerId) await refreshAll();
+    if (sale.customerId) {
+      await Promise.all([refreshCustomers(), refreshProducts()]);
+    } else {
+      await refreshProducts();
+    }
     return created;
-  }, [refreshAll]);
+  }, [refreshCustomers, refreshProducts]);
 
   const createManualInvoice = useCallback(async (data) => {
     const created = await api.post("/api/invoices/manual", data);
     setManualInvoices((prev) => [created, ...prev]);
-    if (data.customerId) await refreshAll();
+    if (data.customerId) {
+      await Promise.all([refreshCustomers(), refreshProducts()]);
+    } else {
+      await refreshProducts();
+    }
     return created;
-  }, [refreshAll]);
+  }, [refreshCustomers, refreshProducts]);
 
   const updateInvoice = useCallback(async (id, data, source) => {
     const updated = await api.put(`/api/invoices/${id}?source=${source === "manual" ? "manual" : "pos"}`, data);
@@ -190,14 +242,18 @@ export function useProducts(uid) {
     } else {
       setSales((prev) => prev.map((i) => (String(i.id) === String(id) ? updated : i)));
     }
+    await Promise.all([refreshProducts(), refreshCustomers()]);
     return updated;
-  }, []);
+  }, [refreshProducts, refreshCustomers]);
 
   const deleteInvoice = useCallback(async (id, source) => {
-    await api.delete(`/api/invoices/${id}?source=${source === "manual" ? "manual" : "pos"}`);
-    // Stock & customer stats are restored server-side — refresh to reflect them.
-    await refreshAll();
-  }, [refreshAll]);
+    if (source === "manual") {
+      await api.delete(`/api/invoices/${id}?source=manual`);
+    } else {
+      await api.delete(`/api/pos/${id}`);
+    }
+    await Promise.all([refreshProducts(), refreshCustomers(), refreshInvoices()]);
+  }, [refreshProducts, refreshCustomers, refreshInvoices]);
 
   // ── Customer actions ─────────────────────────────────────────────────────
   const addCustomer = useCallback(async (form) => {
@@ -224,8 +280,8 @@ export function useProducts(uid) {
       source: sales.some((s) => String(s.id) === String(a.invoiceId)) ? "pos" : "manual",
     }));
     await api.post("/api/invoices/receive-payment", { customerId, amount, date, note, allocations: mapped });
-    await refreshAll();
-  }, [sales, refreshAll]);
+    await Promise.all([refreshCustomers(), refreshInvoices()]);
+  }, [sales, refreshCustomers, refreshInvoices]);
 
   const addBalanceAdjustment = useCallback(async ({ customerId, type, amount, reason, date }) => {
     const updated = await api.post(`/api/customers/${customerId}/adjustments`, { type, amount, reason, date });
@@ -252,7 +308,6 @@ export function useProducts(uid) {
   }, []);
 
   const updateInvoiceSettings = useCallback(async (settings) => {
-    // Logo is too large for a normal row — keep it in IndexedDB, store a marker server-side.
     const { logo, ...rest } = settings;
     const payload = { ...rest };
     if (logo !== undefined) {
