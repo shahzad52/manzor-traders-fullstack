@@ -1,13 +1,10 @@
 import { useState } from "react";
 
-export default function LoginView({ onEmailLogin, onForgotPassword }) {
-  const [mode, setMode] = useState("login"); // "login" | "forgot"
+export default function LoginView({ onEmailLogin }) {
   const [form, setForm] = useState({ email: "", password: "" });
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
   const [showPw, setShowPw] = useState(false);
-  const [forgotEmail, setForgotEmail] = useState("");
-  const [forgotSent, setForgotSent] = useState(false);
 
   const validate = () => {
     const e = {};
@@ -43,23 +40,6 @@ export default function LoginView({ onEmailLogin, onForgotPassword }) {
     }
   };
 
-  const handleForgotSubmit = async () => {
-    if (!forgotEmail.includes("@")) {
-      setErrors({ forgotEmail: "Enter a valid email address" });
-      return;
-    }
-    setLoading(true);
-    setErrors({});
-    try {
-      await onForgotPassword(forgotEmail);
-      setForgotSent(true);
-    } catch (err) {
-      setErrors({ general: authErrorMsg(err) });
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const set = (key) => (e) => {
     setForm(f => ({ ...f, [key]: e.target.value }));
     setErrors(er => ({ ...er, [key]: "", general: "" }));
@@ -82,108 +62,6 @@ export default function LoginView({ onEmailLogin, onForgotPassword }) {
     </div>
   );
 
-  // ── Forgot Password View ─────────────────────────────────────────────────
-  if (mode === "forgot") {
-    return (
-      <div
-        className="min-h-screen flex items-center justify-center bg-slate-100 p-4"
-        style={{ fontFamily: "'Plus Jakarta Sans', 'DM Sans', 'Segoe UI', sans-serif" }}
-      >
-        <div className="w-full max-w-[440px] rounded-2xl overflow-hidden shadow-2xl shadow-slate-300/60 border border-slate-200/60 bg-white">
-          <div className="p-8">
-            <Logo />
-
-            {/* Heading */}
-            <div className="mb-6">
-              <h1 className="text-[22px] font-extrabold text-slate-800 tracking-tight leading-none">
-                Reset Password
-              </h1>
-              <p className="text-slate-400 text-xs mt-1.5">
-                Email enter karo, hum aapko reset link bhejein ge
-              </p>
-            </div>
-
-            {/* Success State */}
-            {forgotSent ? (
-              <div className="text-center py-4">
-                <div className="w-14 h-14 rounded-full bg-green-50 border-2 border-green-200 flex items-center justify-center mx-auto mb-4">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                </div>
-                <p className="font-bold text-slate-800 text-sm mb-1">Email bhej diya gaya!</p>
-                <p className="text-slate-400 text-xs mb-5">
-                  <span className="font-semibold text-slate-600">{forgotEmail}</span> par password reset link bheja gaya hai. Inbox check karo.
-                </p>
-                <button
-                  onClick={() => { setMode("login"); setForgotSent(false); setForgotEmail(""); setErrors({}); }}
-                  className="w-full py-2.5 rounded-xl text-white text-sm font-bold tracking-tight transition-all flex items-center justify-center gap-2"
-                  style={{ background: "#1D6FDB" }}
-                  onMouseEnter={e => (e.currentTarget.style.background = "#185FA5")}
-                  onMouseLeave={e => (e.currentTarget.style.background = "#1D6FDB")}
-                >
-                  ← Back to Sign In
-                </button>
-              </div>
-            ) : (
-              <>
-                {/* General Error */}
-                {errors.general && (
-                  <div className="mb-3 px-3.5 py-2.5 rounded-xl bg-red-50 border border-red-200 flex items-center gap-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5" strokeLinecap="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
-                    <p className="text-red-600 text-xs font-medium">{errors.general}</p>
-                  </div>
-                )}
-
-                {/* Email Field */}
-                <div className="mb-5">
-                  <label className={labelCls}>Email Address</label>
-                  <input
-                    type="email"
-                    value={forgotEmail}
-                    onChange={(e) => { setForgotEmail(e.target.value); setErrors({}); }}
-                    placeholder="you@example.com"
-                    className={inputCls("forgotEmail")}
-                    onKeyDown={(e) => e.key === "Enter" && handleForgotSubmit()}
-                  />
-                  {errors.forgotEmail && <p className="text-red-500 text-[10px] mt-1 font-medium">{errors.forgotEmail}</p>}
-                </div>
-
-                {/* Submit */}
-                <button
-                  onClick={handleForgotSubmit}
-                  disabled={loading}
-                  className="w-full py-2.5 rounded-xl text-white text-sm font-bold tracking-tight transition-all disabled:opacity-60 flex items-center justify-center gap-2"
-                  style={{ background: "#1D6FDB" }}
-                  onMouseEnter={e => !e.currentTarget.disabled && (e.currentTarget.style.background = "#185FA5")}
-                  onMouseLeave={e => (e.currentTarget.style.background = "#1D6FDB")}
-                >
-                  {loading ? (
-                    <><svg className="animate-spin" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M21 12a9 9 0 11-6.219-8.56" /></svg>Bhej raha hai...</>
-                  ) : (
-                    <>Reset Link Bhejo <span className="opacity-70">→</span></>
-                  )}
-                </button>
-
-                {/* Back link */}
-                <p className="text-center text-xs text-slate-400 mt-4">
-                  Yaad aa gaya?{" "}
-                  <button
-                    onClick={() => { setMode("login"); setErrors({}); setForgotEmail(""); }}
-                    className="font-bold" style={{ color: "#1D6FDB" }}
-                  >
-                    Sign in karo
-                  </button>
-                </p>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ── Login View ───────────────────────────────────────────────────────────
   return (
     <div
       className="min-h-screen flex items-center justify-center bg-slate-100 p-4"
@@ -220,18 +98,9 @@ export default function LoginView({ onEmailLogin, onForgotPassword }) {
             </div>
 
             <div>
-              {/* Password Label + Forgot Password Link */}
-              <div className="flex items-center justify-between mb-1.5">
+              {/* Password Label */}
+              <div className="mb-1.5">
                 <label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Password</label>
-                <button
-                  onClick={() => { setMode("forgot"); setErrors({}); setForgotEmail(form.email); }}
-                  className="text-[10px] font-bold transition-colors"
-                  style={{ color: "#1D6FDB" }}
-                  onMouseEnter={e => (e.currentTarget.style.color = "#185FA5")}
-                  onMouseLeave={e => (e.currentTarget.style.color = "#1D6FDB")}
-                >
-                  Forgot Password?
-                </button>
               </div>
               <div className="relative">
                 <input type={showPw ? "text" : "password"} value={form.password} onChange={set("password")} placeholder="••••••••" className={inputCls("password") + " pr-9"} onKeyDown={(e) => e.key === "Enter" && handleSubmit()} />
